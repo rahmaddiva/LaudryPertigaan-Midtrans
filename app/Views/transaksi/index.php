@@ -43,6 +43,7 @@
                                     <th>Nama Pelanggan</th>
                                     <th>Kode Transaksi</th>
                                     <th>Tanggal Masuk</th>
+                                    <th>Status</th>
                                     <th>Total Harga</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -55,6 +56,13 @@
                                         <td><?= $a['nama_pelanggan'] ?></td>
                                         <td><?= $a['kode_transaksi'] ?></td>
                                         <td><?= $a['tanggal_masuk'] ?></td>
+                                        <td>
+                                            <?php if ($a['status'] == 'Berhasil'): ?>
+                                                <span class="badge bg-success">Selesai</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-warning">Proses</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><?= $a['total_harga'] ?></td>
                                         <td>
                                             <div class="btn-group">
@@ -67,10 +75,99 @@
                                                     onclick="return confirm('Apakah Anda Yakin?')">
                                                     <i class="bx bx-trash"></i>
                                                 </a>
-                                                <a href="/transaksi/bayar/<?= $a['id_transaksi'] ?>"
-                                                    class="btn btn-outline-success">
+                                                <!-- Tombol Bayar -->
+                                                <a href="#" class="btn btn-outline-success" data-bs-toggle="modal"
+                                                    data-bs-target="#modalBayar<?= $a['id_transaksi'] ?>">
                                                     <i class="bx bx-money"></i> Bayar
                                                 </a>
+
+                                                <!-- Modal Bayar -->
+                                                <div class="modal fade" id="modalBayar<?= $a['id_transaksi'] ?>"
+                                                    tabindex="-1" aria-hidden="true">
+                                                    <div class="modal-dialog modal-dialog-centered">
+                                                        <div class="modal-content">
+                                                            <form id="form-bayar-<?= $a['id_transaksi'] ?>">
+
+                                                                <input type="hidden" name="id_transaksi"
+                                                                    value="<?= $a['id_transaksi'] ?>">
+                                                                <div class="modal-header">
+                                                                    <h5 class="modal-title">Pembayaran Transaksi
+                                                                        #<?= $a['id_transaksi'] ?></h5>
+                                                                    <button type="button" class="btn-close"
+                                                                        data-bs-dismiss="modal"></button>
+                                                                </div>
+                                                                <div class="modal-body">
+                                                                    <div class="mb-3">
+                                                                        <label for="metode" class="form-label">Metode
+                                                                            Pembayaran</label>
+                                                                        <select name="metode_pembayaran"
+                                                                            class="form-select metode-select"
+                                                                            data-id="<?= $a['id_transaksi'] ?>" required>
+                                                                            <option value="">-- Pilih --</option>
+                                                                            <option value="midtrans">Midtrans</option>
+                                                                            <option value="cash">Cash</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div id="midtrans-button-<?= $a['id_transaksi'] ?>"
+                                                                        style="display: none;">
+                                                                        <button type="button"
+                                                                            id="pay-button-<?= $a['id_transaksi'] ?>"
+                                                                            class="btn btn-success">Bayar Sekarang</button>
+                                                                    </div>
+                                                                    <p class="mt-3">Total Bayar: <strong>Rp
+                                                                            <?= number_format($a['total_harga'], 0, ',', '.') ?></strong>
+                                                                    </p>
+                                                                </div>
+                                                            </form>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <script src="https://app.sandbox.midtrans.com/snap/snap.js"
+                                                    data-client-key="SB-Mid-client-DiCeUhzEkKiExosF"></script>
+                                                <script>
+                                                    document.querySelectorAll('.metode-select').forEach(function (select) {
+                                                        select.addEventListener('change', function () {
+                                                            const id = this.dataset.id;
+                                                            const metode = this.value;
+                                                            const btnContainer = document.getElementById('midtrans-button-' + id);
+
+                                                            if (metode === 'midtrans') {
+                                                                btnContainer.style.display = 'block';
+
+                                                                document.getElementById('pay-button-' + id).onclick = function () {
+                                                                    fetch('/transaksi/bayar/' + id)
+                                                                        .then(response => response.json())
+                                                                        .then(data => {
+                                                                            if (data.status === 'success') {
+                                                                                snap.pay(data.snapToken, {
+                                                                                    onSuccess: function () {
+                                                                                        alert("Pembayaran berhasil!");
+                                                                                        window.location.reload();
+                                                                                    },
+                                                                                    onPending: function () {
+                                                                                        alert("Menunggu pembayaran...");
+                                                                                        window.location.reload();
+                                                                                    },
+                                                                                    onError: function () {
+                                                                                        alert("Pembayaran gagal!");
+                                                                                    },
+                                                                                    onClose: function () {
+                                                                                        alert("Kamu belum menyelesaikan pembayaran.");
+                                                                                    }
+                                                                                });
+                                                                            } else {
+                                                                                alert("Gagal mendapatkan Snap Token: " + data.message);
+                                                                            }
+                                                                        });
+                                                                };
+                                                            } else {
+                                                                btnContainer.style.display = 'none';
+                                                            }
+                                                        });
+                                                    });
+
+                                                </script>
+
                                             </div>
                                         </td>
 

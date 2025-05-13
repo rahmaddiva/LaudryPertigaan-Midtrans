@@ -11,7 +11,7 @@ class PembayaranModel extends Model
     protected $useAutoIncrement = true;
     protected $returnType = 'array';
     protected $protectFields = true;
-    protected $allowedFields = ['id_transaksi', 'metode_pembayaran', 'status_pembayaran', 'tanggal_pembayaran', 'snap_token'];
+    protected $allowedFields = ['id_transaksi', 'order_id', 'metode_pembayaran', 'status_pembayaran', 'tanggal_bayar', 'snap_token'];
 
 
     // Dates

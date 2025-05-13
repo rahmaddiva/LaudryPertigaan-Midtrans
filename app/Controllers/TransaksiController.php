@@ -4,6 +4,7 @@ namespace App\Controllers;
 use Config\Midtrans as MidtransConfig;
 use Midtrans\Snap;
 use App\Controllers\BaseController;
+use Midtrans\Notification;
 use App\Models\TransaksiModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use App\Models\PelangganModel;
@@ -47,48 +48,141 @@ class TransaksiController extends BaseController
         return view('transaksi/index', $data);
     }
 
+    public function sukses()
+    {
+        return view('transaksi/sukses');
+    }
+
     public function bayar($id_transaksi)
     {
         MidtransConfig::init();
 
         $transaksi = db_connect()->table('transaksi_laundry')
-            ->select('transaksi_laundry.*, tb_pelanggan.nama_pelanggan , tb_pelanggan.id_pelanggan, tb_pelanggan.email, tb_pelanggan.no_telepon')
+            ->select('transaksi_laundry.*, tb_pelanggan.nama_pelanggan, tb_pelanggan.email, tb_pelanggan.no_telepon')
             ->join('tb_pelanggan', 'tb_pelanggan.id_pelanggan = transaksi_laundry.id_pelanggan')
             ->where('transaksi_laundry.id_transaksi', $id_transaksi)
             ->get()
             ->getRowArray();
-        if (!$transaksi) {
-            return redirect()->to('/transaksi')->with('error', 'Transaksi tidak ditemukan.');
-        }
 
+        if (!$transaksi) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'Transaksi tidak ditemukan.'
+            ]);
+        }
+        $order_id = $transaksi['kode_transaksi'];
         $params = [
             'transaction_details' => [
-                'order_id' => $transaksi['kode_transaksi'],
-                'gross_amount' => $transaksi['total_harga'],
+                'order_id' => $order_id,
+                'gross_amount' => (int) $transaksi['total_harga'],
             ],
             'customer_details' => [
-                'first_name' => $transaksi['nama_pelanggan'], // sesuaikan
-                'email' => $transaksi['email'], // sesuaikan
-                'phone' => $transaksi['no_telepon'], // sesuaikan
+                'first_name' => $transaksi['nama_pelanggan'],
+                'email' => $transaksi['email'],
+                'phone' => $transaksi['no_telepon'],
+            ],
+            'callbacks' => [
+                'finish' => base_url('/transaksi/sukses'), // Redirect ketika selesai
             ]
         ];
 
-        $snapToken = Snap::getSnapToken($params);
+        try {
+            $snapToken = Snap::getSnapToken($params);
+        } catch (\Exception $e) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'Gagal mendapatkan token pembayaran: ' . $e->getMessage()
+            ]);
+        }
 
-        // simpan data ke tabel pembayaran
-        $this->pembayaranModel->insert([
-            'id_transaksi' => $id_transaksi,
+        return $this->response->setJSON([
+            'status' => 'success',
+            'snapToken' => $snapToken
+        ]);
+    }
+    public function callback()
+    {
+        // Ambil data dari body (raw JSON)
+        $json = file_get_contents("php://input");
+        $data = json_decode($json, true);
+
+        // Log data callback untuk debug
+        log_message('info', 'Data callback Midtrans: ' . json_encode($data));
+
+        // Ambil field penting dari callback
+        $order_id = $data['order_id'] ?? null;
+        $transaction_status = $data['transaction_status'] ?? null;
+        $status_code = $data['status_code'] ?? null;
+        $gross_amount = $data['gross_amount'] ?? null;
+        $signature_key = $data['signature_key'] ?? null;
+
+        // Validasi semua data ada
+        if (!$order_id || !$transaction_status || !$status_code || !$gross_amount || !$signature_key) {
+            log_message('error', 'Data callback tidak lengkap.');
+            return;
+        }
+
+        // Validasi signature
+        $server_key = getenv('SB-Mid-server-xFcnK43bSot2QXKfv-RkBB3V');
+        $expected_signature = hash('sha512', $order_id . $status_code . $gross_amount . $server_key);
+        if ($signature_key !== $expected_signature) {
+            log_message('error', 'Signature tidak valid!');
+            return;
+        }
+
+        // Hubungkan ke database & model
+        $db = db_connect();
+        $pembayaranModel = new PembayaranModel();
+
+        // Cek transaksi berdasarkan order_id
+        $transaksi = $db->table('transaksi_laundry')
+            ->where('kode_transaksi', $order_id)
+            ->get()
+            ->getRowArray();
+
+        if (!$transaksi) {
+            log_message('error', "Transaksi dengan kode $order_id tidak ditemukan.");
+            return;
+        }
+
+        // Tentukan status pembayaran
+        $status_pembayaran = match (strtolower($transaction_status)) {
+            'settlement', 'capture' => 'Berhasil',
+            'pending' => 'Pending',
+            'cancel', 'expire', 'deny' => 'Gagal',
+            default => null
+        };
+
+        if (!$status_pembayaran) {
+            log_message('error', "Status transaksi tidak dikenali: $transaction_status");
+            return;
+        }
+
+        // Simpan atau update ke tabel pembayaran
+        $existing = $pembayaranModel->where('order_id', $order_id)->first();
+
+
+
+        $dataPembayaran = [
+            'id_transaksi' => $transaksi['id_transaksi'],
             'metode_pembayaran' => 'Midtrans',
-            'status_pembayaran' => 'Pending',
+            'status_pembayaran' => $status_pembayaran,
             'tanggal_bayar' => date('Y-m-d H:i:s'),
-            'snap_token' => $snapToken
-        ]);
+            'order_id' => $order_id,
+            'snap_token' => $data['token'] ?? null, // optional
+        ];
 
-        return view('transaksi/bayar', [
-            'snapToken' => $snapToken,
-            'transaksi' => $transaksi
-        ]);
 
+        if ($existing) {
+            $pembayaranModel->update($existing['id_pembayaran'], $dataPembayaran);
+            log_message('info', "Data pembayaran diupdate untuk order_id $order_id");
+        } else {
+            $pembayaranModel->insert($dataPembayaran);
+            log_message('info', "Data pembayaran disimpan baru untuk order_id $order_id");
+        }
+
+        // Kembalikan response OK ke Midtrans
+        return $this->response->setStatusCode(200)->setBody('OK');
     }
 
     public function proses()
@@ -112,7 +206,6 @@ class TransaksiController extends BaseController
 
         // Generate kode transaksi (contoh: TRX20250505123001)
         $kode_transaksi = 'TRX' . date('YmdHis') . rand(10, 99);
-
         $total_harga = 0;
         $detailData = [];
 
@@ -213,5 +306,16 @@ class TransaksiController extends BaseController
         return redirect()->to('/transaksi')->with('success', 'Transaksi berhasil diupdate.');
     }
 
+    public function delete($id)
+    {
+        $transaksi = $this->transaksiModel->find($id);
+        if (!$transaksi) {
+            return redirect()->to('/transaksi')->with('error', 'Transaksi tidak ditemukan.');
+        }
 
+        // Hapus detail transaksi
+        $this->DetailTransaksiModel->where('id_transaksi', $id)->delete();
+        $this->transaksiModel->delete($id);
+        return redirect()->to('/transaksi')->with('success', 'Transaksi berhasil dihapus.');
+    }
 }

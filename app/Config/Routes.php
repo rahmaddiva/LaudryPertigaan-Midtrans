@@ -27,4 +27,8 @@ $routes->get('/transaksi', 'TransaksiController::index');
 $routes->post('/proses_transaksi', 'TransaksiController::proses');
 $routes->post('update_transaksi/(:any)', 'TransaksiController::update/$1');
 $routes->get('/transaksi/bayar/(:num)', 'TransaksiController::bayar/$1');
+$routes->post('/midtrans/callback', 'TransaksiController::callback');
+$routes->get('/transaksi/sukses', 'TransaksiController::sukses');
+$routes->get('/delete_transaksi/(:any)', 'TransaksiController::delete/$1');
+
 

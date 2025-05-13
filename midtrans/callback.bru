@@ -1,0 +1,25 @@
+meta {
+  name: callback
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8080/midtrans/callback/
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "order_id": "TRX2025051214330856",
+    "transaction_status": "settlement",
+    "status_code": "200",
+    "gross_amount": "43000.00",
+    "signature_key": "f4032f4d77b8de3b1cd49e0c22a00d84b2e35c18157b0fd6e4299799a35a5d5370e8b3b45371cdba3969293a3cbfbb6aa6ff6940b71e43e1e8edfd0b62b37a10"
+  }
+}
